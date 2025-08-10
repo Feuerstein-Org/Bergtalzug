@@ -1,0 +1,71 @@
+[project]
+name = "bergtalzug"
+version = "0.1.0"
+description = "Monorepo for bergtalzug"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [ "redis-limiters" ]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "printf-log-formatter",
+    "coverage",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "pyright[nodejs]",
+    "pytest-randomly",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.5,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    'if TYPE_CHECKING:',
+    'pragma: no cover',
+    "if __name__ == '__main__':",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+lint.select = ["A", "ANN", "B", "C", "F", "W", "C90", "C4", "I", "T20", "PT", "PLE", "PLR", "PLW", "SIM", "RUF", "RET"]
+lint.ignore = ["ANN401", "PLR1711"]
+lint.fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PLE", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
+lint.unfixable = []
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[tool.pyright]
+pythonVersion = "3.13"
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
