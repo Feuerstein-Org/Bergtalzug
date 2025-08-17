@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Monorepo for bergtalzug"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [ "redis-limiters" ]
+dependencies = [
+ "culsans>=0.9.0",
+ "redis-limiters",
+]
 
 [dependency-groups]
 dev = [
@@ -37,9 +40,9 @@ exclude_lines = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-lint.select = ["A", "ANN", "B", "C", "F", "W", "C90", "C4", "I", "T20", "PT", "PLE", "PLR", "PLW", "SIM", "RUF", "RET"]
-lint.ignore = ["ANN401", "PLR1711"]
-lint.fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PLE", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
+lint.select = ["A", "ANN", "ASYNC", "B", "C", "D", "F", "C90", "C4", "T20", "PT", "PLE", "PLR", "PLW", "SIM", "RUF", "RET"]
+lint.ignore = ["ANN401", "PLR1711", "D400", "D203", "D212", "D415"]
+lint.fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "ASYNC", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PLE", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
 lint.unfixable = []
 exclude = [
     ".bzr",
@@ -68,4 +71,9 @@ exclude = [
 [tool.pyright]
 pythonVersion = "3.13"
 pythonPlatform = "Linux"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
+# Those are enabled with strict mode, but can be uncommented to enable them in other modes
+# reportUnknownMemberType = "error"
+# reportUnknownVariableType = "error"
+# reportUnknownArgumentType = "error"
+# reportUnknownParameterType = "error"
