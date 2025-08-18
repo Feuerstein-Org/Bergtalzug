@@ -36,7 +36,7 @@ class ETLPipeline(ABC):
     All steps will be executed concurrently and asynchronously. Just override the abstract methods.
 
     The specific methods are:
-    add_items_to_queue: which is called periodically to add items to the queue if it falls below a threshold.
+    refill_queue: which is called periodically to add items to the queue if it falls below a threshold.
     fetch: which is called to fetch data.
     process: which is called to process the fetched data.
     store: which is called to store the processed data.
@@ -91,7 +91,7 @@ class ETLPipeline(ABC):
         self._store_queue = culsans.Queue[WorkItem | None](maxsize=self._store_queue_size)
 
     @abstractmethod
-    async def add_items_to_queue(self, count: int) -> list[WorkItem]:
+    async def refill_queue(self, count: int) -> list[WorkItem]:
         """
         Abstract method that gets called periodically to add items to the queue if falls below a threshold.
 
@@ -147,7 +147,7 @@ class ETLPipeline(ABC):
                 # Request 90% of available space as safety buffer, later might need to add buffer due to overflow risk
                 count = max(1, available_space)
                 try:
-                    items = await self.add_items_to_queue(count)
+                    items = await self.refill_queue(count)
 
                     if not items:
                         self.logger.info("No more items available, initiating shutdown")
@@ -160,7 +160,7 @@ class ETLPipeline(ABC):
                     self.logger.debug("Added %s items to fetch queue", len(items))
 
                 except Exception as e:
-                    self.logger.error("Error in add_items_to_queue: %s", e)
+                    self.logger.error("Error in refill_queue: %s", e)
                     # Continue running - don't break the pipeline for this error
             # Check every second
             await asyncio.sleep(1.0)  # TODO: let this value be configured instead of hardcoding
