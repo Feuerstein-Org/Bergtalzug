@@ -189,6 +189,8 @@ class ETLPipeline(ABC):
                     "Fetch error: %s", e
                 )  # TODO: Add retry logic or error handling or dead-letter queue + log
             finally:
+                # For now still need to mark as done even on failure to prevent deadlock
+                # This WILL loose items in case of error!!
                 self._fetch_queue.task_done()
 
     def _process_worker(self) -> None:
@@ -216,6 +218,8 @@ class ETLPipeline(ABC):
                     "Processing error: %s", e
                 )  # TODO: Add retry logic or error handling or dead-letter queue + log
             finally:
+                # For now still need to mark as done even on failure to prevent deadlock
+                # This WILL loose items in case of error!!
                 self._process_queue.sync_q.task_done()
 
     async def _store_worker(self) -> None:
@@ -241,6 +245,8 @@ class ETLPipeline(ABC):
                     "Storing error: %s", e
                 )  # TODO: Add retry logic or error handling or dead-letter queue + log
             finally:
+                # For now still need to mark as done even on failure to prevent deadlock
+                # This WILL loose items in case of error!!
                 self._store_queue.async_q.task_done()
 
     # NOTE: Potentially allow to pass initial jobs to the pipeline
@@ -292,25 +298,21 @@ class ETLPipeline(ABC):
         # Wait for the queue manager to signal completion
         await queue_manager_task
 
-        self.logger.info("Waiting for all jobs to complete")
+        self.logger.info("Waiting for all jobs to complete a")
 
-        # Wait for all jobs to be processed
+        # Sequential shutdown with proper synchronization
         await self._fetch_queue.join()
-        await self._process_queue.async_q.join()
-        await self._store_queue.async_q.join()
-
-        self.logger.info("All jobs processed, sending out poison pills to workers")
-
-        # Shutdown: send poison pills
-        # Stop downloaders
+        self.logger.info("All fetch jobs completed, shutting down fetch workers")
         for _ in range(self._fetch_workers):
             await self._fetch_queue.put(None)
 
-        # Stop processors (through sync queue from last downloader)
+        await self._process_queue.async_q.join()
+        self.logger.info("All process jobs completed, shutting down process workers")
         for _ in range(self._process_workers):
             await self._process_queue.async_q.put(None)
 
-        # Stop uploaders
+        await self._store_queue.async_q.join()
+        self.logger.info("All store jobs completed, shutting down store workers")
         for _ in range(self._store_workers):
             await self._store_queue.async_q.put(None)
 
