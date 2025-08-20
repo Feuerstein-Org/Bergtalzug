@@ -19,6 +19,7 @@ dev = [
     "ruff",
     "pyright[nodejs]",
     "pytest-randomly",
+    "pytest-mock",
 ]
 
 [build-system]

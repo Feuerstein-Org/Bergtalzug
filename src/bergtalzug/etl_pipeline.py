@@ -24,6 +24,7 @@ class WorkItem:
     """
 
     data: bytes
+    # TODO: At each stage add metadata to the item, e.g. fetched, processed, stored
     metadata: dict[Any, Any]  # specify with pydantic later
     job_id: str
 
@@ -145,7 +146,7 @@ class ETLPipeline(ABC):
                 target_size = int(self._fetch_queue_size * 0.9)
                 available_space = target_size - current_size
                 # Request 90% of available space as safety buffer, later might need to add buffer due to overflow risk
-                count = max(1, available_space)
+                count = max(1, available_space)  # even if available space is 0, we want to refill at least one item
                 try:
                     items = await self.refill_queue(count)
 
