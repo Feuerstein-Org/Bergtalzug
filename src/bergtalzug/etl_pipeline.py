@@ -10,8 +10,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Annotated
 import culsans
+from pydantic import BaseModel, Field
 
 
 @dataclass
@@ -29,6 +30,38 @@ class WorkItem:
     job_id: str
 
 
+PositiveInt = Annotated[int, Field(gt=0, description="Number of processing workers")]
+
+
+class ETLPipelineConfig(BaseModel):
+    """
+    Configuration model for ETL Pipeline with validation.
+
+    Args:
+        pipeline_name (str): Name of the pipeline for logging.
+        fetch_workers (PositiveInt): Number of concurrent fetch workers.
+        process_workers (PositiveInt): Number of processing workers.
+        upload_workers (PositiveInt): Number of upload workers.
+        fetch_queue_size (PositiveInt): Size of the fetch queue.
+        process_queue_size (PositiveInt): Size of the process queue.
+        store_queue_size (PositiveInt): Size of the store queue.
+
+    Raises:
+        ValidationError: If any of the provided parameters are invalid
+
+    """
+
+    pipeline_name: str = "etl_pipeline"
+    fetch_workers: PositiveInt = 10
+    process_workers: PositiveInt = 5
+    upload_workers: PositiveInt = 10
+    fetch_queue_size: PositiveInt = 1000
+    process_queue_size: PositiveInt = 500
+    store_queue_size: PositiveInt = 1000
+
+    # TODO: Potentially add some validation functions, e.g. too big/small queue etc.
+
+
 class ETLPipeline(ABC):
     """
     Abstract base class for an ETL pipeline.
@@ -43,40 +76,36 @@ class ETLPipeline(ABC):
     store: which is called to store the processed data.
     """
 
-    def __init__(  # noqa: PLR0913
-        self,  # TODO: potentially add a config class later
-        pipeline_name: str = "etl_pipeline",
-        fetch_workers: int = 10,
-        process_workers: int = 5,
-        upload_workers: int = 10,
-        fetch_queue_size: int = 1000,
-        process_queue_size: int = 500,
-        store_queue_size: int = 1000,
-    ) -> None:
+    def __init__(self, config: ETLPipelineConfig | None = None, **kwargs: Any) -> None:
         """
-        Initialize the ETL pipeline with the given parameters.
+        Initialize the ETL pipeline with validated configuration.
 
         Args:
-            pipeline_name (str): Name of the pipeline for logging.
-            fetch_workers (int): Number of concurrent fetch workers.
-            process_workers (int): Number of processing workers.
-            upload_workers (int): Number of upload workers.
-            fetch_queue_size (int): Size of the fetch queue.
-            process_queue_size (int): Size of the process queue.
-            store_queue_size (int): Size of the store queue.
+            config: ETLPipelineConfig object with validated parameters
+            **kwargs: Individual parameters (will be validated and converted to config)
+
+        Raises:
+            ValidationError: If any of the provided parameters are invalid
 
         """
-        self.logger = logging.getLogger(f"etl.{pipeline_name}")
-        self.pipeline_name = pipeline_name
-        self._fetch_workers = fetch_workers
-        self._process_workers = process_workers
-        self._store_workers = upload_workers
-        self._fetch_queue_size = fetch_queue_size
-        self._process_queue_size = process_queue_size
-        self._store_queue_size = store_queue_size
+        if config is None:
+            config = ETLPipelineConfig(**kwargs)
+        elif kwargs:
+            # If both config and kwargs are provided, raise an error to avoid confusion
+            raise ValueError("Cannot provide both 'config' and individual parameters via kwargs")
+
+        self.config = config
+        self.logger = logging.getLogger(f"etl.{config.pipeline_name}")
+        self.pipeline_name = config.pipeline_name
+        self._fetch_workers = config.fetch_workers
+        self._process_workers = config.process_workers
+        self._store_workers = config.upload_workers
+        self._fetch_queue_size = config.fetch_queue_size
+        self._process_queue_size = config.process_queue_size
+        self._store_queue_size = config.store_queue_size
 
         # Thread pool for processing
-        self.executor = ThreadPoolExecutor(max_workers=process_workers)
+        self.executor = ThreadPoolExecutor(max_workers=config.process_workers)
 
     async def _setup_queues(self) -> None:
         """

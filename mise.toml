@@ -34,3 +34,11 @@ run = [
     "uv run ruff check --fix .",
     "uv run ruff format .",
 ]
+
+[tasks.test]
+description = "Run tests with coverage & pre-commit"
+depends = ["pre-commit"]
+run = [
+    "uv run coverage run -m pytest",
+    "uv run coverage report --fail-under=80"
+]

@@ -19,6 +19,6 @@ Example usage:
             pass
 """
 
-from bergtalzug.etl_pipeline import ETLPipeline, WorkItem
+from bergtalzug.etl_pipeline import ETLPipeline, ETLPipelineConfig, WorkItem
 
-__all__ = ["ETLPipeline", "WorkItem"]
+__all__ = ["ETLPipeline", "ETLPipelineConfig", "WorkItem"]
