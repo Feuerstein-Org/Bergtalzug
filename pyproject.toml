@@ -42,7 +42,7 @@ exclude_lines = [
 line-length = 120
 target-version = "py311"
 lint.select = ["A", "ANN", "ASYNC", "B", "C", "D", "F", "C90", "C4", "T20", "PT", "PLE", "PLR", "PLW", "SIM", "RUF", "RET"]
-lint.ignore = ["ANN401", "PLR1711", "D400", "D203", "D212", "D415"]
+lint.ignore = ["ANN401", "PLR1711", "D400", "D203", "D212", "D415", "D401"]
 lint.fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "ASYNC", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PLE", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
 lint.unfixable = []
 exclude = [
@@ -68,6 +68,9 @@ exclude = [
     "node_modules",
     "venv",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]
 
 [tool.pyright]
 pythonVersion = "3.13"
