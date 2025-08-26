@@ -1,34 +1,19 @@
 """Test fixtures for ETL Pipeline tests."""
 
 from dataclasses import dataclass
+import pytest
+from typing import Any
 from bergtalzug import ETLPipeline, ETLPipelineConfig, WorkItem
 from pytest_mock import MockerFixture
-from typing import Any
-from uuid import uuid4
 import asyncio
 import time
 
 
-def work_item_factory(
-    count: int = 1, data: str | bytes = b"test_data", metadata: Any = None, job_id: str | None = None
-) -> list[WorkItem]:
-    """
-    Create a list of WorkItem instances with custom data, by default one item.
-
-    count determines how many items to create
-    job_id is only applied to the first item, others get a random value
-    data and metadata will be the same across all items created
-    """
+def work_item_factory(count: int = 1, data: bytes = b"test_data") -> list[WorkItem]:
+    """Create a list of WorkItem instances with custom data."""
     work_items: list[WorkItem] = []
-    if metadata is None:
-        metadata = {"source": "test"}
-    if isinstance(data, str):
-        data = data.encode()
-    if job_id is None:
-        job_id = str(uuid4().hex[:6])
     for _ in range(count):
-        work_items.append(WorkItem(data=data, metadata=metadata, job_id=job_id))
-        job_id = str(uuid4().hex[:6])  # TODO: Later this will be handled in real class
+        work_items.append(WorkItem(data=data))
     return work_items
 
 
@@ -39,20 +24,19 @@ class MockETLPipelineConfig:
 
     No validation is performed here. This class is used to have lower testing defaults
     and is passed to the ETLPipelineConfig class which performs validation.
-    Validation can be disabled by setting "bypass_validation" to True.
     """
 
     pipeline_name: str = "mock_etl_pipeline"
-    fetch_workers: int = 3
-    process_workers: int = 2
-    upload_workers: int = 3
+    fetch_workers: int = 1
+    process_workers: int = 1
+    upload_workers: int = 1
     fetch_queue_size: int = 10
     process_queue_size: int = 5
     store_queue_size: int = 10
+    queue_refresh_rate: float = 0.01  # seconds
     enable_tracking: bool = True
     stats_interval_seconds: float = 10.0
     # Test specific parameters
-    bypass_validation: bool = False  # If true, skips config validation in ETLPipeline
     items_to_process: list[WorkItem] | None = None
     refill_queue_sleep: float | None = None
     fetch_sleep: float | None = None
@@ -77,41 +61,20 @@ class MockETLPipeline(ETLPipeline):
             config = MockETLPipelineConfig()
 
         # Pass ETL pipeline parameters to parent constructor
-        if config.bypass_validation:
-            # Bypass validation
-            etl_config = ETLPipelineConfig.model_construct(
-                pipeline_name=config.pipeline_name,
-                fetch_workers=config.fetch_workers,
-                process_workers=config.process_workers,
-                upload_workers=config.upload_workers,
-                fetch_queue_size=config.fetch_queue_size,
-                process_queue_size=config.process_queue_size,
-                store_queue_size=config.store_queue_size,
-            )
-        else:
-            etl_config = ETLPipelineConfig(
-                pipeline_name=config.pipeline_name,
-                fetch_workers=config.fetch_workers,
-                process_workers=config.process_workers,
-                upload_workers=config.upload_workers,
-                fetch_queue_size=config.fetch_queue_size,
-                process_queue_size=config.process_queue_size,
-                store_queue_size=config.store_queue_size,
-            )
+        etl_config = ETLPipelineConfig(
+            pipeline_name=config.pipeline_name,
+            fetch_workers=config.fetch_workers,
+            process_workers=config.process_workers,
+            upload_workers=config.upload_workers,
+            fetch_queue_size=config.fetch_queue_size,
+            process_queue_size=config.process_queue_size,
+            store_queue_size=config.store_queue_size,
+            queue_refresh_rate=config.queue_refresh_rate,
+            enable_tracking=config.enable_tracking,
+            stats_interval_seconds=config.stats_interval_seconds,
+        )
 
-        # Conditionally patch ThreadPoolExecutor only if process_workers are disabled (set to 0)
-        if etl_config.process_workers == 0:
-            mock_executor = mocker.MagicMock()
-            mock_executor.submit = mocker.MagicMock()
-            mock_executor.shutdown = mocker.MagicMock()
-
-            # Patch ThreadPoolExecutor during parent initialization
-            mocker.patch("bergtalzug.etl_pipeline.ThreadPoolExecutor", return_value=mock_executor)
-            super().__init__(config=etl_config)
-
-            self.executor = mock_executor
-        else:
-            super().__init__(config=etl_config)
+        super().__init__(config=etl_config)
 
         # Store configuration
         self.config = config
@@ -181,9 +144,74 @@ class MockETLPipeline(ETLPipeline):
 MockETLPipeline.__abstractmethods__ = frozenset()
 
 
-# NOTE: Currently this is not a fixture, but a factory function,
-# The reason is that currently there are no tests sharing the same mock ETL pipeline.
-# This means the mocker fixture must be passed explicitly in tests.
-def mock_etl_pipeline_factory(mocker: MockerFixture, config: MockETLPipelineConfig | None = None) -> MockETLPipeline:
-    """Create a mock ETL pipeline implementation for testing."""
-    return MockETLPipeline(mocker, config)
+class MockETLPipelineFactory:
+    """Collection of factory methods to create MockETLPipeline instances."""
+
+    def __init__(self, mocker: MockerFixture) -> None:
+        """Initialize the mocker."""
+        self._mocker = mocker
+
+    def create(self, config: MockETLPipelineConfig | None = None) -> MockETLPipeline:
+        """
+        Create a MockETLPipeline with the given configuration.
+
+        Args:
+            config: Optional pipeline configuration. Uses defaults if None.
+
+        Returns:
+            MockETLPipeline: A configured mock pipeline instance.
+
+        Example:
+            ```python
+            pipeline = builder.create(MockETLPipelineConfig(items_to_process=items))
+            ```
+
+        """
+        return MockETLPipeline(self._mocker, config)
+
+    def create_items(self, count: int, **kwargs: Any) -> MockETLPipeline:
+        """
+        Create a pipeline with a number of items to process.
+
+        Args:
+            count: Number of WorkItem instances to process.
+            **kwargs: Additional configuration parameters.
+
+        Returns:
+            MockETLPipeline: A configured pipeline with the given items.
+
+        Example:
+            ```python
+            pipeline = builder.create_items(count=5)
+            ```
+
+        """
+        items = work_item_factory(count=count)
+        config = MockETLPipelineConfig(items_to_process=items, **kwargs)
+        return self.create(config)
+
+    def pass_items(self, items: list[WorkItem], **kwargs: Any) -> MockETLPipeline:
+        """
+        Create a pipeline with the passed item instances to process.
+
+        Args:
+            items: List of WorkItem instances to process.
+            **kwargs: Additional configuration parameters.
+
+        Returns:
+            MockETLPipeline: A configured pipeline with the given items.
+
+        Example:
+            ```python
+            pipeline = builder.pass_items(work_item_factory(count=5))
+            ```
+
+        """
+        config = MockETLPipelineConfig(items_to_process=items, **kwargs)
+        return self.create(config)
+
+
+@pytest.fixture
+def mock_etl_pipeline_factory(mocker: MockerFixture) -> MockETLPipelineFactory:
+    """Fixture providing a MockETLPipelineFactory for creating test pipelines"""
+    return MockETLPipelineFactory(mocker)
