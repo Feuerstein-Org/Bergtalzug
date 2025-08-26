@@ -183,7 +183,8 @@ class ItemTracker:
             }
 
 
-PositiveInt = Annotated[int, Field(gt=0, description="Number of processing workers")]
+PositiveInt = Annotated[int, Field(gt=0)]
+NonNegativeFloat = Annotated[float, Field(ge=0)]
 
 
 # TODO: each workers should have an ID for identification/logging
@@ -199,6 +200,9 @@ class ETLPipelineConfig(BaseModel):
         fetch_queue_size (PositiveInt): Size of the fetch queue.
         process_queue_size (PositiveInt): Size of the process queue.
         store_queue_size (PositiveInt): Size of the store queue.
+        queue_refresh_rate (NonNegativeFloat): Interval in seconds to check and refill the fetch queue.
+        enable_tracking (bool): Whether to enable item tracking.
+        stats_interval_seconds (NonNegativeFloat): Interval in seconds to report pipeline statistics.
 
     Raises:
         ValidationError: If any of the provided parameters are invalid
@@ -212,6 +216,7 @@ class ETLPipelineConfig(BaseModel):
     fetch_queue_size: PositiveInt = 1000
     process_queue_size: PositiveInt = 500
     store_queue_size: PositiveInt = 1000
+    queue_refresh_rate: float = 1.0  # seconds
     enable_tracking: bool = True
     stats_interval_seconds: float = 10.0
 
@@ -259,6 +264,7 @@ class ETLPipeline(ABC):
         self._fetch_queue_size = config.fetch_queue_size
         self._process_queue_size = config.process_queue_size
         self._store_queue_size = config.store_queue_size
+        self._queue_refresh_rate = config.queue_refresh_rate
 
         # Initialize tracker
         self.tracker = ItemTracker() if config.enable_tracking else None
@@ -368,7 +374,7 @@ class ETLPipeline(ABC):
         """Periodically check queue size and add items if below 50% capacity."""
         while True:
             current_size = self._fetch_queue.qsize()
-            threshold = self._fetch_queue_size / 2  # 50% threshold
+            threshold = self._fetch_queue_size / 2  # 50% threshold, TODO: make configurable
 
             if current_size < threshold:
                 self.logger.debug(
@@ -398,7 +404,7 @@ class ETLPipeline(ABC):
                     self.logger.error("Error in refill_queue: %s", e)
                     # Continue running - don't break the pipeline for this error
             # Check every second
-            await asyncio.sleep(1.0)  # TODO: let this value be configured instead of hardcoding
+            await asyncio.sleep(self._queue_refresh_rate)
 
     async def _fetch_worker(self) -> None:
         """
