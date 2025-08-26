@@ -453,42 +453,50 @@ class ETLPipeline(ABC):
         if self.tracker:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        while True:
-            work_item = self._process_queue.sync_q.get()
+        try:
+            while True:
+                work_item = self._process_queue.sync_q.get()
 
-            if work_item is None:  # Poison pill
-                self.logger.info("Process worker received poison pill, shutting down")
-                break
+                if work_item is None:  # Poison pill
+                    self.logger.info("Process worker received poison pill, shutting down")
+                    break
 
-            try:
-                # Update metadata (using sync approach)
-                if self.tracker and loop:
-                    loop.run_until_complete(self.tracker.update_item_stage(work_item.job_id, PipelineStage.PROCESSING))
-                work_item.metadata.process_started_at = datetime.now(timezone.utc)
+                try:
+                    # Update metadata (using sync approach)
+                    if self.tracker and loop:
+                        loop.run_until_complete(
+                            self.tracker.update_item_stage(work_item.job_id, PipelineStage.PROCESSING)
+                        )
+                    work_item.metadata.process_started_at = datetime.now(timezone.utc)
 
-                # Perform processing
-                self.logger.debug(
-                    "Received process job from queue, calling abstract process function for job %s", work_item.job_id
-                )
-                processed_item = self.process(work_item)
-
-                # Update metadata
-                processed_item.metadata.process_completed_at = datetime.now(timezone.utc)
-                if self.tracker and loop:
-                    loop.run_until_complete(
-                        self.tracker.update_item_stage(processed_item.job_id, PipelineStage.QUEUED_STORE)
+                    # Perform processing
+                    self.logger.debug(
+                        "Received process job from queue, calling abstract process function for job %s",
+                        work_item.job_id,
                     )
+                    processed_item = self.process(work_item)
 
-                self._store_queue.sync_q.put(processed_item)
-            except Exception as e:
-                self.logger.error("Process error for job %s: %s", work_item.job_id, e)
-                if self.tracker and loop:
-                    loop.run_until_complete(self.tracker.complete_item(work_item.job_id, success=False, error=e))
-                # TODO: Add retry logic or error handling or dead-letter queue + log
-            finally:
-                # For now still need to mark as done even on failure to prevent deadlock
-                # This WILL loose items in case of error!!
-                self._process_queue.sync_q.task_done()
+                    # Update metadata
+                    processed_item.metadata.process_completed_at = datetime.now(timezone.utc)
+                    if self.tracker and loop:
+                        loop.run_until_complete(
+                            self.tracker.update_item_stage(processed_item.job_id, PipelineStage.QUEUED_STORE)
+                        )
+
+                    self._store_queue.sync_q.put(processed_item)
+                except Exception as e:
+                    self.logger.error("Process error for job %s: %s", work_item.job_id, e)
+                    if self.tracker and loop:
+                        loop.run_until_complete(self.tracker.complete_item(work_item.job_id, success=False, error=e))
+                    # TODO: Add retry logic or error handling or dead-letter queue + log
+                finally:
+                    # For now still need to mark as done even on failure to prevent deadlock
+                    # This WILL loose items in case of error!!
+                    self._process_queue.sync_q.task_done()
+        finally:
+            # Properly close the event loop
+            if loop:
+                loop.close()
 
     async def _store_worker(self) -> None:
         """
