@@ -183,8 +183,8 @@ class ItemTracker:
             }
 
 
-PositiveInt = Annotated[int, Field(gt=0)]
-NonNegativeFloat = Annotated[float, Field(ge=0)]
+PositiveInt = Annotated[int, Field(gt=0, strict=True)]
+NonNegativeFloat = Annotated[float, Field(ge=0, strict=True)]
 
 
 # TODO: each workers should have an ID for identification/logging
@@ -196,7 +196,7 @@ class ETLPipelineConfig(BaseModel):
         pipeline_name (str): Name of the pipeline for logging.
         fetch_workers (PositiveInt): Number of concurrent fetch workers.
         process_workers (PositiveInt): Number of processing workers.
-        upload_workers (PositiveInt): Number of upload workers.
+        store_workers (PositiveInt): Number of store workers.
         fetch_queue_size (PositiveInt): Size of the fetch queue.
         process_queue_size (PositiveInt): Size of the process queue.
         store_queue_size (PositiveInt): Size of the store queue.
@@ -212,13 +212,13 @@ class ETLPipelineConfig(BaseModel):
     pipeline_name: str = "etl_pipeline"
     fetch_workers: PositiveInt = 10
     process_workers: PositiveInt = 5
-    upload_workers: PositiveInt = 10
+    store_workers: PositiveInt = 10
     fetch_queue_size: PositiveInt = 1000
     process_queue_size: PositiveInt = 500
     store_queue_size: PositiveInt = 1000
-    queue_refresh_rate: float = 1.0  # seconds
-    enable_tracking: bool = True
-    stats_interval_seconds: float = 10.0
+    queue_refresh_rate: NonNegativeFloat = 1.0  # seconds
+    stats_interval_seconds: NonNegativeFloat = 10.0
+    enable_tracking: bool = Field(default=True, strict=True)
 
     # TODO: Potentially add some validation functions, e.g. too big/small queue etc.
 
@@ -260,7 +260,7 @@ class ETLPipeline(ABC):
         self.pipeline_name = config.pipeline_name
         self._fetch_workers = config.fetch_workers
         self._process_workers = config.process_workers
-        self._store_workers = config.upload_workers
+        self._store_workers = config.store_workers
         self._fetch_queue_size = config.fetch_queue_size
         self._process_queue_size = config.process_queue_size
         self._store_queue_size = config.store_queue_size
@@ -311,7 +311,7 @@ class ETLPipeline(ABC):
         Abstract method that gets called when an item was processed.
 
         This method should handle the storage of the processed data.
-        It is expected to be asynchronous, e.g., uploading to S3.
+        It is expected to be asynchronous, e.g., storeing to S3.
         """
         pass
 
@@ -567,7 +567,7 @@ class ETLPipeline(ABC):
             future = loop.run_in_executor(self.executor, self._process_worker)
             process_futures.append(future)
 
-        # Start upload workers (async)
+        # Start store workers (async)
         store_tasks: list[asyncio.Task[None]] = []
         for _ in range(self._store_workers):
             task = asyncio.create_task(self._store_worker())

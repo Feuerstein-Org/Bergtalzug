@@ -77,7 +77,7 @@ class TestPipelineIntegration:
     async def test_pipeline_concurrent_processing(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test concurrent processing maintains data integrity"""
         pipeline = mock_etl_pipeline_factory.create_items(
-            50, fetch_workers=5, process_workers=5, upload_workers=5, process_sleep=0.01
+            50, fetch_workers=5, process_workers=5, store_workers=5, process_sleep=0.01
         )
         results = await pipeline.run()
 

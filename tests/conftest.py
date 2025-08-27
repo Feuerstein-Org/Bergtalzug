@@ -29,7 +29,7 @@ class MockETLPipelineConfig:
     pipeline_name: str = "mock_etl_pipeline"
     fetch_workers: int = 1
     process_workers: int = 1
-    upload_workers: int = 1
+    store_workers: int = 1
     fetch_queue_size: int = 10
     process_queue_size: int = 5
     store_queue_size: int = 10
@@ -65,7 +65,7 @@ class MockETLPipeline(ETLPipeline):
             pipeline_name=config.pipeline_name,
             fetch_workers=config.fetch_workers,
             process_workers=config.process_workers,
-            upload_workers=config.upload_workers,
+            store_workers=config.store_workers,
             fetch_queue_size=config.fetch_queue_size,
             process_queue_size=config.process_queue_size,
             store_queue_size=config.store_queue_size,
