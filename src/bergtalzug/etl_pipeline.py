@@ -174,13 +174,59 @@ class ItemTracker:
                 if durations:
                     avg_duration = sum(durations) / len(durations)
 
+            # TODO: This is potentially expensive, consider caching or optimizing
+            # Stage-specific average durations
+            stage_durations: dict[str, list[float]] = {"fetch": [], "process": [], "store": []}
+
+            for result in self._completed.values():
+                metadata = result.metadata
+
+                # Fetch stage duration
+                if metadata.fetch_started_at and metadata.fetch_completed_at:
+                    fetch_duration = (metadata.fetch_completed_at - metadata.fetch_started_at).total_seconds()
+                    stage_durations["fetch"].append(fetch_duration)
+
+                # Process stage duration
+                if metadata.process_started_at and metadata.process_completed_at:
+                    process_duration = (metadata.process_completed_at - metadata.process_started_at).total_seconds()
+                    stage_durations["process"].append(process_duration)
+
+                # Store stage duration
+                if metadata.store_started_at and metadata.store_completed_at:
+                    store_duration = (metadata.store_completed_at - metadata.store_started_at).total_seconds()
+                    stage_durations["store"].append(store_duration)
+
+            # Averages for each stage
+            avg_stage_durations = {}
+            for stage, durations in stage_durations.items():
+                if durations:
+                    avg_stage_durations[f"average_{stage}_duration_seconds"] = sum(durations) / len(durations)
+                else:
+                    avg_stage_durations[f"average_{stage}_duration_seconds"] = None
+
             return {
                 "active_items": len(self._items),
                 "active_by_stage": active_stages,
                 "completed_items": completed_count,
                 "success_rate": success_count / completed_count if completed_count > 0 else 0,
                 "average_duration_seconds": avg_duration,
+                **avg_stage_durations,
             }
+
+    async def log_statistics(self, logger: logging.Logger) -> None:
+        """Log pipeline statistics"""
+        stats = await self.get_statistics()
+        logger.info(
+            "Pipeline Stats | Active: %d | Active items by stage: %s | Completed: %d | Success Rate: %.2f%% | Avg Duration: %.2fs | Avg Fetch Duration: %.2fs | Avg Process Duration: %.2fs | Avg Store Duration: %.2fs",
+            stats["active_items"],
+            stats["active_by_stage"],
+            stats["completed_items"],
+            stats["success_rate"] * 100,
+            stats["average_duration_seconds"] or 0,
+            stats["average_fetch_duration_seconds"] or 0,
+            stats["average_process_duration_seconds"] or 0,
+            stats["average_store_duration_seconds"] or 0,
+        )
 
 
 PositiveInt = Annotated[int, Field(gt=0, strict=True)]
@@ -333,15 +379,7 @@ class ETLPipeline(ABC):
         while True:
             try:
                 if self.tracker:
-                    stats = await self.tracker.get_statistics()
-                    self.logger.info(
-                        "Pipeline Stats | Active: %d | Active items by stage: %s | Completed: %d | Success Rate: %.2f%% | Avg Duration: %.2fs",
-                        stats["active_items"],
-                        stats["active_by_stage"],
-                        stats["completed_items"],
-                        stats["success_rate"] * 100,
-                        stats["average_duration_seconds"] or 0,
-                    )
+                    await self.tracker.log_statistics(self.logger)
             except Exception as e:
                 self.logger.error("Error reporting stats: %s", e)
 
@@ -627,13 +665,7 @@ class ETLPipeline(ABC):
         results = []
         if self.tracker:
             results = await self.tracker.get_completed_results()
-            final_stats = await self.tracker.get_statistics()
-            self.logger.info(
-                "ETL pipeline %s completed | Total processed: %d | Success rate: %.2f%%",
-                self.pipeline_name,
-                final_stats["completed_items"],
-                final_stats["success_rate"] * 100,
-            )
+            await self.tracker.log_statistics(self.logger)
         else:
             self.logger.info("ETL pipeline %s completed", self.pipeline_name)
 
