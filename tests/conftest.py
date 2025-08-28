@@ -35,7 +35,7 @@ class MockETLPipelineConfig:
     store_queue_size: int = 10
     queue_refresh_rate: float = 0.01  # seconds
     enable_tracking: bool = True
-    stats_interval_seconds: float = 10.0
+    stats_interval_seconds: float = 1.0
     # Test specific parameters
     items_to_process: list[WorkItem] | None = None
     refill_queue_sleep: float | None = None
