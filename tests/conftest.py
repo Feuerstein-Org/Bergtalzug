@@ -6,7 +6,6 @@ from typing import Any
 from bergtalzug import ETLPipeline, ETLPipelineConfig, WorkItem
 from pytest_mock import MockerFixture
 import asyncio
-import time
 
 
 def work_item_factory(count: int = 1, data: bytes = b"test_data") -> list[WorkItem]:
@@ -105,9 +104,9 @@ class MockETLPipeline(ETLPipeline):
         """Run a single fetch worker, overridden to avoid calling protected method."""
         await self._fetch_worker()
 
-    def process_worker(self) -> None:
+    async def process_worker(self) -> None:
         """Run a single process worker, overridden to avoid calling protected method."""
-        self._process_worker()
+        await self._process_worker()
 
     async def store_worker(self) -> None:
         """Run a single store worker, overridden to avoid calling protected method."""
@@ -128,9 +127,9 @@ class MockETLPipeline(ETLPipeline):
             await asyncio.sleep(self.config.fetch_sleep)
         return item
 
-    def _process_impl(self, item: WorkItem) -> WorkItem:
+    async def _process_impl(self, item: WorkItem) -> WorkItem:
         if self.config.process_sleep is not None and self.config.process_sleep > 0:
-            time.sleep(self.config.process_sleep)
+            await asyncio.sleep(self.config.process_sleep)
         item.data = b"processed_" + item.data
         return item
 

@@ -1,13 +1,14 @@
 """
 ETL Pipeline Implementation
 
-This module implements an ETL (Extract, Transform, Load) pipeline using asyncio, multthreading and culsans for concurrency.
+This module implements an ETL (Extract, Transform, Load) pipeline using asyncio and culsans for concurrency.
+If high CPU load is expected during processing, consider using ProcessPoolExecutor in the process method.
+If on the other hand code that releases the GIL but isn't async is expected, consider using ThreadPoolExecutor.
 It defines an abstract base class `ETLPipeline` and a test implementation
 """
 
 import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from typing import Any, Annotated
@@ -314,8 +315,6 @@ class ETLPipeline(ABC):
 
         # Initialize tracker
         self.tracker = ItemTracker() if config.enable_tracking else None
-        # Thread pool for processing
-        self.executor = ThreadPoolExecutor(max_workers=config.process_workers)
         # Statistics task
         self._stats_task: asyncio.Task[None] | None = None
 
@@ -340,13 +339,18 @@ class ETLPipeline(ABC):
         pass
 
     # TODO: Add a way to switch between ThreadPoolExecutor and ProcessPoolExecutor
+    # This could be something the user provides in the config and in the backgroung
+    # everything is set up to run in the specific executor, we would support async,thread,multi
     @abstractmethod
-    def process(self, item: WorkItem) -> WorkItem:
+    async def process(self, item: WorkItem) -> WorkItem:
         """
         Abstract method that gets called when an item was passed from the fetch method.
 
-        Note that this method is synchronous and runs in a thread pool.
-        Any code that doesn't release the GIL should be avoided.
+        Note that this method is async.
+        If synchronous code needs to be run use a ThreadPoolExecutor or ProcessPoolExecutor.
+        Code that releases the GIL but it isn't async should use ThreadPoolExecutor.
+        High CPU load code should use ProcessPoolExecutor.
+
         Once processing is done the item should be returned as a WorkItem.
         """
         pass
@@ -368,7 +372,7 @@ class ETLPipeline(ABC):
         This method sets up the queues used in the ETL pipeline.
         """
         # Job queue for initial distribution
-        self._fetch_queue = asyncio.Queue[WorkItem | None](maxsize=self._fetch_queue_size)
+        self._fetch_queue = culsans.Queue[WorkItem | None](maxsize=self._fetch_queue_size)
 
         # culsans queues provide both async and sync interfaces
         self._process_queue = culsans.Queue[WorkItem | None](maxsize=self._process_queue_size)
@@ -434,7 +438,7 @@ class ETLPipeline(ABC):
                         if self.tracker:
                             await self.tracker.register_item(item)
                             await self.tracker.update_item_stage(item.job_id, PipelineStage.QUEUED_FETCH)
-                        await self._fetch_queue.put(item)
+                        await self._fetch_queue.async_put(item)
 
                     self.logger.debug("Added %s items to fetch queue", len(items))
 
@@ -451,7 +455,7 @@ class ETLPipeline(ABC):
         Gets fetch jobs from the fetch queue and gets data asynchronously.
         """
         while True:
-            work_item = await self._fetch_queue.get()
+            work_item = await self._fetch_queue.async_get()
             if work_item is None:  # Poison pill
                 self.logger.info("Fetch worker received poison pill, shutting down")
                 break
@@ -469,7 +473,7 @@ class ETLPipeline(ABC):
                 fetched_item.metadata.fetch_completed_at = datetime.now(timezone.utc)
                 if self.tracker:
                     await self.tracker.update_item_stage(fetched_item.job_id, PipelineStage.QUEUED_PROCESS)
-                await self._process_queue.async_q.put(fetched_item)
+                await self._process_queue.async_put(fetched_item)
             except Exception as e:
                 self.logger.error("Fetch error for job %s: %s", work_item.job_id, e)
                 if self.tracker:
@@ -480,61 +484,42 @@ class ETLPipeline(ABC):
                 # This WILL loose items in case of error!!
                 self._fetch_queue.task_done()
 
-    def _process_worker(self) -> None:
+    async def _process_worker(self) -> None:
         """
-        Sync processing worker.
+        Async process worker.
 
         Gets process jobs from the process queue and processes them.
         """
-        # Create event loop to post medata updates
-        loop = None
-        if self.tracker:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        try:
-            while True:
-                work_item = self._process_queue.sync_q.get()
+        while True:
+            work_item = await self._process_queue.async_get()
+            if work_item is None:  # Poison pill
+                self.logger.info("Process worker received poison pill, shutting down")
+                break
 
-                if work_item is None:  # Poison pill
-                    self.logger.info("Process worker received poison pill, shutting down")
-                    break
+            try:
+                if self.tracker:
+                    await self.tracker.update_item_stage(work_item.job_id, PipelineStage.PROCESSING)
+                work_item.metadata.process_started_at = datetime.now(timezone.utc)
+                self.logger.debug(
+                    "Received process job from queue, calling abstract process function for job %s", work_item.job_id
+                )
 
-                try:
-                    # Update metadata (using sync approach)
-                    if self.tracker and loop:
-                        loop.run_until_complete(
-                            self.tracker.update_item_stage(work_item.job_id, PipelineStage.PROCESSING)
-                        )
-                    work_item.metadata.process_started_at = datetime.now(timezone.utc)
+                processed_item = await self.process(work_item)
 
-                    # Perform processing
-                    self.logger.debug(
-                        "Received process job from queue, calling abstract process function for job %s",
-                        work_item.job_id,
-                    )
-                    processed_item = self.process(work_item)
-
-                    # Update metadata
-                    processed_item.metadata.process_completed_at = datetime.now(timezone.utc)
-                    if self.tracker and loop:
-                        loop.run_until_complete(
-                            self.tracker.update_item_stage(processed_item.job_id, PipelineStage.QUEUED_STORE)
-                        )
-
-                    self._store_queue.sync_q.put(processed_item)
-                except Exception as e:
-                    self.logger.error("Process error for job %s: %s", work_item.job_id, e)
-                    if self.tracker and loop:
-                        loop.run_until_complete(self.tracker.complete_item(work_item.job_id, success=False, error=e))
-                    # TODO: Add retry logic or error handling or dead-letter queue + log
-                finally:
-                    # For now still need to mark as done even on failure to prevent deadlock
-                    # This WILL loose items in case of error!!
-                    self._process_queue.sync_q.task_done()
-        finally:
-            # Properly close the event loop
-            if loop:
-                loop.close()
+                processed_item.metadata.process_completed_at = datetime.now(timezone.utc)
+                if self.tracker:
+                    await self.tracker.update_item_stage(processed_item.job_id, PipelineStage.QUEUED_STORE)
+                await self._store_queue.async_put(processed_item)
+            except Exception as e:
+                self.logger.error("Process error for job %s: %s", work_item.job_id, e)
+                if self.tracker:
+                    await self.tracker.complete_item(work_item.job_id, success=False, error=e)
+                # TODO: Add retry logic (DLQ) or error handling or dead-letter queue + log
+            finally:
+                # For now still need to mark as done even on failure to prevent deadlock
+                # This WILL loose items in case of error!!
+                self._process_queue.task_done()
+        return
 
     async def _store_worker(self) -> None:
         """
@@ -543,8 +528,7 @@ class ETLPipeline(ABC):
         Gets store jobs from the store queue and stores data asynchronously.
         """
         while True:
-            work_item = await self._store_queue.async_q.get()
-
+            work_item = await self._store_queue.async_get()
             if work_item is None:  # Poison pill
                 self.logger.info("Store worker received poison pill, shutting down")
                 break
@@ -571,7 +555,7 @@ class ETLPipeline(ABC):
             finally:
                 # For now still need to mark as done even on failure to prevent deadlock
                 # This WILL loose items in case of error!!
-                self._store_queue.async_q.task_done()
+                self._store_queue.task_done()
 
     # NOTE: Potentially allow to pass initial jobs to the pipeline
     # Also might be worth adding a setup abstract method to initialize the pipeline
@@ -592,20 +576,19 @@ class ETLPipeline(ABC):
         if self.config.enable_tracking and self.config.stats_interval_seconds > 0:
             self._stats_task = asyncio.create_task(self._periodic_stats_reporter())
 
-        # Start download workers (async)
+        # Start download workers
         fetch_tasks: list[asyncio.Task[None]] = []
         for _ in range(self._fetch_workers):
             task = asyncio.create_task(self._fetch_worker())
             fetch_tasks.append(task)
 
-        # Start processing workers (in thread pool)
-        loop = asyncio.get_event_loop()
-        process_futures: list[asyncio.Future[None]] = []
+        # Start process workers
+        process_tasks: list[asyncio.Task[None]] = []
         for _ in range(self._process_workers):
-            future = loop.run_in_executor(self.executor, self._process_worker)
-            process_futures.append(future)
+            task = asyncio.create_task(self._process_worker())
+            process_tasks.append(task)
 
-        # Start store workers (async)
+        # Start store workers
         store_tasks: list[asyncio.Task[None]] = []
         for _ in range(self._store_workers):
             task = asyncio.create_task(self._store_worker())
@@ -629,24 +612,24 @@ class ETLPipeline(ABC):
         self.logger.info("Waiting for all jobs to complete")
 
         # Sequential shutdown
-        await self._fetch_queue.join()
+        await self._fetch_queue.async_join()
         self.logger.info("All fetch jobs completed, shutting down fetch workers")
         for _ in range(self._fetch_workers):
-            await self._fetch_queue.put(None)
+            await self._fetch_queue.async_put(None)
 
-        await self._process_queue.async_q.join()
+        await self._process_queue.async_join()
         self.logger.info("All process jobs completed, shutting down process workers")
         for _ in range(self._process_workers):
-            await self._process_queue.async_q.put(None)
+            await self._process_queue.async_put(None)
 
-        await self._store_queue.async_q.join()
+        await self._store_queue.async_join()
         self.logger.info("All store jobs completed, shutting down store workers")
         for _ in range(self._store_workers):
-            await self._store_queue.async_q.put(None)
+            await self._store_queue.async_put(None)
 
         # Wait for workers to finish
         await asyncio.gather(*fetch_tasks)
-        await asyncio.gather(*process_futures)
+        await asyncio.gather(*process_tasks)
         await asyncio.gather(*store_tasks)
 
         # Stop stats reporter
@@ -655,9 +638,11 @@ class ETLPipeline(ABC):
             with contextlib.suppress(asyncio.CancelledError):
                 await self._stats_task
 
-        # Close queues
+        # Close queues, TODO: Is this needed?
+        self._fetch_queue.close()
         self._process_queue.close()
         self._store_queue.close()
+        await self._fetch_queue.wait_closed()
         await self._process_queue.wait_closed()
         await self._store_queue.wait_closed()
 
@@ -670,5 +655,4 @@ class ETLPipeline(ABC):
             self.logger.info("ETL pipeline %s completed", self.pipeline_name)
 
         # Shutdown executor
-        self.executor.shutdown(wait=True)
         return results

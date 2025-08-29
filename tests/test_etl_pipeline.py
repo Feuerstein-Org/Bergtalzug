@@ -44,7 +44,7 @@ class TestPipelineIntegration:
         pipeline = mock_etl_pipeline_factory.pass_items(items)
 
         # Make second item fail during processing
-        def process_with_error(item: WorkItem) -> WorkItem:
+        async def process_with_error(item: WorkItem) -> WorkItem:
             if item.job_id == items[1].job_id:
                 raise ValueError("Processing error")
             return item
