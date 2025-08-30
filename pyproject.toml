@@ -81,3 +81,7 @@ typeCheckingMode = "strict"
 # reportUnknownVariableType = "error"
 # reportUnknownArgumentType = "error"
 # reportUnknownParameterType = "error"
+
+executionEnvironments = [
+    { root = "tests", reportPrivateUsage = false }
+]

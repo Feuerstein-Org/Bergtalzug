@@ -6,6 +6,7 @@ from typing import Any
 from bergtalzug import ETLPipeline, ETLPipelineConfig, WorkItem
 from pytest_mock import MockerFixture
 import asyncio
+import time
 
 
 def work_item_factory(count: int = 1, data: bytes = b"test_data") -> list[WorkItem]:
@@ -33,14 +34,15 @@ class MockETLPipelineConfig:
     process_queue_size: int = 5
     store_queue_size: int = 10
     queue_refresh_rate: float = 0.01  # seconds
-    enable_tracking: bool = True
     stats_interval_seconds: float = 1.0
+    enable_tracking: bool = True
     # Test specific parameters
     items_to_process: list[WorkItem] | None = None
     refill_queue_sleep: float | None = None
     fetch_sleep: float | None = None
     process_sleep: float | None = None
     store_sleep: float | None = None
+    process_is_sync: bool = False  # Whether to use sync_process or async process
 
 
 class MockETLPipeline(ETLPipeline):
@@ -69,48 +71,37 @@ class MockETLPipeline(ETLPipeline):
             process_queue_size=config.process_queue_size,
             store_queue_size=config.store_queue_size,
             queue_refresh_rate=config.queue_refresh_rate,
-            enable_tracking=config.enable_tracking,
             stats_interval_seconds=config.stats_interval_seconds,
+            enable_tracking=config.enable_tracking,
         )
 
+        self.mock_process_is_sync = config.process_is_sync
         super().__init__(config=etl_config)
 
         # Store configuration
         self.config = config
 
-        # Should be replaced soon once we allow WorkItems to be set on startup
+        # TODO: Should be replaced soon once we allow WorkItems to be set on startup
         self.items_to_process: list[WorkItem] = config.items_to_process or []
 
         # Create mocks with implementation
         self.mock_refill_queue = mocker.AsyncMock(side_effect=self._refill_queue_impl)
         self.mock_fetch = mocker.AsyncMock(side_effect=self._fetch_impl)
         self.mock_process = mocker.Mock(side_effect=self._process_impl)
+        self.mock_sync_process = mocker.Mock(side_effect=self._sync_process_impl)
         self.mock_store = mocker.AsyncMock(side_effect=self._store_impl)
 
         # Replace the actual methods with mocks
         self.refill_queue = self.mock_refill_queue
         self.fetch = self.mock_fetch
         self.process = self.mock_process
+        self.sync_process = self.mock_sync_process
         self.store = self.mock_store
 
-    async def setup_queues(self) -> None:
-        """Setup queues, overridden to avoid calling protected method."""
-        await self._setup_queues()
-        self.fetch_queue = self._fetch_queue
-        self.process_queue = self._process_queue
-        self.store_queue = self._store_queue
-
-    async def fetch_worker(self) -> None:
-        """Run a single fetch worker, overridden to avoid calling protected method."""
-        await self._fetch_worker()
-
-    async def process_worker(self) -> None:
-        """Run a single process worker, overridden to avoid calling protected method."""
-        await self._process_worker()
-
-    async def store_worker(self) -> None:
-        """Run a single store worker, overridden to avoid calling protected method."""
-        await self._store_worker()
+    # Bypass sync validation for testing
+    def _check_process_is_sync(self) -> bool:
+        """Override validation for testing purposes."""
+        return self.mock_process_is_sync
 
     async def _refill_queue_impl(self, count: int) -> list[WorkItem]:
         if self.config.refill_queue_sleep is not None and self.config.refill_queue_sleep > 0:
@@ -133,14 +124,15 @@ class MockETLPipeline(ETLPipeline):
         item.data = b"processed_" + item.data
         return item
 
+    def _sync_process_impl(self, item: WorkItem) -> WorkItem:
+        if self.config.process_sleep is not None and self.config.process_sleep > 0:
+            time.sleep(self.config.process_sleep)
+        item.data = b"processed_" + item.data
+        return item
+
     async def _store_impl(self, item: WorkItem) -> None:
         if self.config.store_sleep is not None and self.config.store_sleep > 0:
             await asyncio.sleep(self.config.store_sleep)
-
-
-# This is needed to disable the abstract methods in the base class
-# since we are mocking them
-MockETLPipeline.__abstractmethods__ = frozenset()
 
 
 class MockETLPipelineFactory:
@@ -150,67 +142,49 @@ class MockETLPipelineFactory:
         """Initialize the mocker."""
         self._mocker = mocker
 
-    def create(self, config: MockETLPipelineConfig | None = None) -> MockETLPipeline:
+    def create(
+        self, config: MockETLPipelineConfig | None = None, work_items_count: int | None = None, **kwargs: Any
+    ) -> MockETLPipeline:
         """
         Create a MockETLPipeline with the given configuration.
 
-        Args:
-            config: Optional pipeline configuration. Uses defaults if None.
-
-        Returns:
-            MockETLPipeline: A configured mock pipeline instance.
-
-        Example:
-            ```python
-            pipeline = builder.create(MockETLPipelineConfig(items_to_process=items))
-            ```
-
+        Will always overwrite items_to_process in config if work_items_count is passed.
         """
+        if config is None:
+            config = MockETLPipelineConfig(**kwargs)
+        elif kwargs:
+            # If both config and kwargs are provided, raise an error to avoid confusion
+            raise ValueError("Cannot provide both 'config' and individual parameters via kwargs")
+        if work_items_count:
+            work_items = work_item_factory(count=work_items_count)
+            config.items_to_process = work_items
         return MockETLPipeline(self._mocker, config)
 
-    def create_items(self, count: int, **kwargs: Any) -> MockETLPipeline:
+    def create_sync(
+        self, config: MockETLPipelineConfig | None = None, work_items_count: int | None = None, **kwargs: Any
+    ) -> MockETLPipeline:
         """
-        Create a pipeline with a number of items to process.
+        Create a MockETLPipeline with the given configuration and use threads for processing.
 
-        Args:
-            count: Number of WorkItem instances to process.
-            **kwargs: Additional configuration parameters.
-
-        Returns:
-            MockETLPipeline: A configured pipeline with the given items.
-
-        Example:
-            ```python
-            pipeline = builder.create_items(count=5)
-            ```
-
+        Will always overwrite items_to_process in config if work_items_count is passed.
         """
-        items = work_item_factory(count=count)
-        config = MockETLPipelineConfig(items_to_process=items, **kwargs)
-        return self.create(config)
-
-    def pass_items(self, items: list[WorkItem], **kwargs: Any) -> MockETLPipeline:
-        """
-        Create a pipeline with the passed item instances to process.
-
-        Args:
-            items: List of WorkItem instances to process.
-            **kwargs: Additional configuration parameters.
-
-        Returns:
-            MockETLPipeline: A configured pipeline with the given items.
-
-        Example:
-            ```python
-            pipeline = builder.pass_items(work_item_factory(count=5))
-            ```
-
-        """
-        config = MockETLPipelineConfig(items_to_process=items, **kwargs)
-        return self.create(config)
+        if config is None:
+            config = MockETLPipelineConfig(**kwargs)
+        elif kwargs:
+            # If both config and kwargs are provided, raise an error to avoid confusion
+            raise ValueError("Cannot provide both 'config' and individual parameters via kwargs")
+        config.process_is_sync = True
+        if work_items_count:
+            work_items = work_item_factory(count=work_items_count)
+            config.items_to_process = work_items
+        return MockETLPipeline(self._mocker, config)
 
 
 @pytest.fixture
 def mock_etl_pipeline_factory(mocker: MockerFixture) -> MockETLPipelineFactory:
     """Fixture providing a MockETLPipelineFactory for creating test pipelines"""
+    # This is needed to disable the validation of existence of
+    # abstract methods since we are mocking them
+    MockETLPipeline.__abstractmethods__ = frozenset()
+
     return MockETLPipelineFactory(mocker)

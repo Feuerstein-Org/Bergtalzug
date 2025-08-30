@@ -25,7 +25,7 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_simple_pipeline_flow(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test basic end-to-end flow"""
-        pipeline = mock_etl_pipeline_factory.create_items(5)
+        pipeline = mock_etl_pipeline_factory.create(work_items_count=5)
         results = await pipeline.run()
 
         # Verify all items processed
@@ -38,10 +38,25 @@ class TestPipelineIntegration:
         assert pipeline.mock_store.call_count == 5
 
     @pytest.mark.asyncio
+    async def test_simple_sync_process_pipeline_flow(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
+        """Test basic end-to-end flow for a sync process pipeline"""
+        pipeline = mock_etl_pipeline_factory.create_sync(work_items_count=5)
+        results = await pipeline.run()
+
+        # Verify all items processed
+        assert len(results) == 5
+        assert all(r.success for r in results)
+
+        # Verify all stages were called
+        assert pipeline.mock_fetch.call_count == 5
+        assert pipeline.mock_sync_process.call_count == 5
+        assert pipeline.mock_store.call_count == 5
+
+    @pytest.mark.asyncio
     async def test_pipeline_with_errors(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test pipeline handles errors gracefully"""
         items = work_item_factory(count=3)
-        pipeline = mock_etl_pipeline_factory.pass_items(items)
+        pipeline = mock_etl_pipeline_factory.create(items_to_process=items)
 
         # Make second item fail during processing
         async def process_with_error(item: WorkItem) -> WorkItem:
@@ -63,7 +78,7 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_queue_management(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test queue refill mechanism"""
-        pipeline = mock_etl_pipeline_factory.create_items(20, fetch_queue_size=5)
+        pipeline = mock_etl_pipeline_factory.create(work_items_count=20, fetch_queue_size=5)
         await pipeline.run()
 
         # Verify refill_queue was called 6 times:
@@ -76,8 +91,8 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_concurrent_processing(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test concurrent processing maintains data integrity"""
-        pipeline = mock_etl_pipeline_factory.create_items(
-            50, fetch_workers=5, process_workers=5, store_workers=5, process_sleep=0.01
+        pipeline = mock_etl_pipeline_factory.create(
+            work_items_count=50, fetch_workers=5, process_workers=5, store_workers=5, process_sleep=0.01
         )
         results = await pipeline.run()
 
@@ -91,7 +106,7 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_updates_tracker_stages(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test that pipeline correctly updates tracker stages"""
-        pipeline = mock_etl_pipeline_factory.create_items(2, process_sleep=0.01)
+        pipeline = mock_etl_pipeline_factory.create(work_items_count=2, process_sleep=0.01)
         assert pipeline.tracker is not None
         tracker = pipeline.tracker
 

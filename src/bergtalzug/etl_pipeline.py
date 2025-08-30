@@ -2,14 +2,17 @@
 ETL Pipeline Implementation
 
 This module implements an ETL (Extract, Transform, Load) pipeline using asyncio and culsans for concurrency.
-If high CPU load is expected during processing, consider using ProcessPoolExecutor in the process method.
-If on the other hand code that releases the GIL but isn't async is expected, consider using ThreadPoolExecutor.
-It defines an abstract base class `ETLPipeline` and a test implementation
+By default processing is done via async (`process` function), however you can use the `sync_process` method
+for synchronous processing with threads. This will use the ThreadPoolExecutor instead.
+
+As of now if `process` is defined the code will run in the same thread as async and
+if `sync_process` is defined it will run in a separate thread.
 """
 
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 from abc import ABC, abstractmethod
 from typing import Any, Annotated
 from collections.abc import Callable
@@ -280,8 +283,12 @@ class ETLPipeline(ABC):
     The specific methods are:
     refill_queue: which is called periodically to add items to the queue if it falls below a threshold.
     fetch: which is called to fetch data.
-    process: which is called to process the fetched data.
+    process: async function which is called to process the fetched data.
+    sync_process: sync function that is called to process the fetched data in a thread.
     store: which is called to store the processed data.
+
+    Note: only process or sync_process can be defined, not both.
+    Only use sync_process if you have non-async compatible code.
     """
 
     def __init__(self, config: ETLPipelineConfig | None = None, **kwargs: Any) -> None:
@@ -311,12 +318,30 @@ class ETLPipeline(ABC):
         self._fetch_queue_size = config.fetch_queue_size
         self._process_queue_size = config.process_queue_size
         self._store_queue_size = config.store_queue_size
+        self._process_executor = None
+        self._process_is_sync = self._check_process_is_sync()
+        if self._process_is_sync:
+            self._process_executor = ThreadPoolExecutor(max_workers=self._process_workers)
+
         self._queue_refresh_rate = config.queue_refresh_rate
 
         # Initialize tracker
         self.tracker = ItemTracker() if config.enable_tracking else None
         # Statistics task
         self._stats_task: asyncio.Task[None] | None = None
+
+    def _check_process_is_sync(self) -> bool:
+        """Validates that exactly one of process or sync_process is implemented."""
+        # Check which methods are implemented
+        has_async = "process" in self.__class__.__dict__
+        has_sync = "sync_process" in self.__class__.__dict__
+
+        if has_sync and has_async:
+            raise TypeError(f"Class {self.__class__.__name__} cannot implement both process and sync_process")
+        if not has_sync and not has_async:
+            raise TypeError(f"Class {self.__class__.__name__} must implement either process or sync_process")
+
+        return has_sync
 
     @abstractmethod
     async def refill_queue(self, count: int) -> list[WorkItem]:
@@ -338,22 +363,48 @@ class ETLPipeline(ABC):
         """
         pass
 
-    # TODO: Add a way to switch between ThreadPoolExecutor and ProcessPoolExecutor
-    # This could be something the user provides in the config and in the backgroung
-    # everything is set up to run in the specific executor, we would support async,thread,multi
-    @abstractmethod
     async def process(self, item: WorkItem) -> WorkItem:
         """
         Abstract method that gets called when an item was passed from the fetch method.
 
         Note that this method is async.
-        If synchronous code needs to be run use a ThreadPoolExecutor or ProcessPoolExecutor.
-        Code that releases the GIL but it isn't async should use ThreadPoolExecutor.
-        High CPU load code should use ProcessPoolExecutor.
+        Use the `sync_process` method if you have non-async workload.
+        This will run the code in a separate thread.
+        Only one of the two can be defined.
 
         Once processing is done the item should be returned as a WorkItem.
         """
-        pass
+        raise NotImplementedError(
+            "The async process method should be implemented in a subclass."
+            "Either 'process' or 'sync_process' must be implemented, but not both."
+        )
+
+    # TODO: Add a way to switch between ThreadPoolExecutor and ProcessPoolExecutor
+    # This is hard because passing the function to the ProcessPoolExecutor requires serialization
+    # of the entire class unless we create a static method just for this.
+    # Serializing the whole class is very inefficient, even the new InterpreterPoolExecutor
+    # requires this type of serialiazation which is not ideal.
+    # With the static method approach, this would mean we would have,
+    # `process`, `sync_process` and `static_sync_process` functions.
+    # Will need to see if there is a better way. Also at some stage we want to have a way
+    # to "build the pipeline" in any way we want, e.g. no hardcoded stages.
+    # It's best to add this feature once dynamic stages are being implemented.
+    def sync_process(self, item: WorkItem) -> WorkItem:
+        """
+        Abstract method that gets called when an item was passed from the fetch method.
+
+        Note that this method is a sync method for multithreading workloads.
+        This method should only be used if execution is needed to be done in a separate thread.
+
+        If asyncio can be used, use the `process` method instead.
+        Only one of the two can be defined.
+
+        Once processing is done the item should be returned as a WorkItem.
+        """
+        raise NotImplementedError(
+            "The sync process method should be implemented in a subclass."
+            "Either 'process' or 'sync_process' must be implemented, but not both."
+        )
 
     @abstractmethod
     async def store(self, item: WorkItem) -> None:
@@ -504,7 +555,12 @@ class ETLPipeline(ABC):
                     "Received process job from queue, calling abstract process function for job %s", work_item.job_id
                 )
 
-                processed_item = await self.process(work_item)
+                # pick execution strategy
+                if not self._process_is_sync:
+                    processed_item = await self.process(work_item)
+                else:
+                    loop = asyncio.get_running_loop()
+                    processed_item = await loop.run_in_executor(self._process_executor, self.sync_process, work_item)
 
                 processed_item.metadata.process_completed_at = datetime.now(timezone.utc)
                 if self.tracker:

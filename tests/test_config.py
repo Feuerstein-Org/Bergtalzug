@@ -2,8 +2,10 @@
 
 import pytest
 from typing import Any
+from conftest import MockETLPipelineFactory
 from pydantic import ValidationError
-from bergtalzug import ETLPipelineConfig
+import random
+from bergtalzug import ETLPipelineConfig, ETLPipeline, WorkItem
 
 
 @pytest.mark.parametrize(
@@ -120,3 +122,76 @@ def test_etl_pipeline_config_validation(config_params: dict[str, Any], error: ty
         # Verify that provided params were set correctly
         for key, value in config_params.items():
             assert getattr(config, key) == value
+
+
+def test_process_is_sync_set_to_true_when_sync_process_defined() -> None:
+    """Test that _process_is_sync is True when sync_process is implemented."""
+
+    class TestSyncPipeline(ETLPipeline):  # pragma: no cover
+        async def refill_queue(self, count: int) -> list[WorkItem]:
+            """Empty fetch"""
+            return [WorkItem(b"test")]
+
+        async def fetch(self, item: WorkItem) -> WorkItem:
+            """Empty fetch"""
+            return item
+
+        def sync_process(self, item: Any) -> Any:
+            """Dummy sync process method."""
+            return item
+
+        async def store(self, item: WorkItem) -> None:
+            """Empty store"""
+            pass
+
+    pipeline = TestSyncPipeline()
+
+    # Assert that _process_is_sync is set to True
+    assert pipeline._process_is_sync is True
+
+
+def test_process_is_sync_set_to_false_when_sync_process_not_defined() -> None:
+    """Test that _process_is_sync is False when process is implemented."""
+
+    class TestSyncPipeline(ETLPipeline):  # pragma: no cover
+        async def refill_queue(self, count: int) -> list[WorkItem]:
+            """Empty fetch"""
+            return [WorkItem(b"test")]
+
+        async def fetch(self, item: WorkItem) -> WorkItem:
+            """Empty fetch"""
+            return item
+
+        async def process(self, item: Any) -> Any:
+            """Dummy async process method."""
+            return item
+
+        async def store(self, item: WorkItem) -> None:
+            """Empty store"""
+            pass
+
+    pipeline = TestSyncPipeline()
+
+    # Assert that _process_is_sync is set to False
+    assert pipeline._process_is_sync is False
+
+
+@pytest.mark.parametrize("count", [random.randint(1, 50) for _ in range(10)])
+def test_thread_pool_executor_size_matches_process_workers(
+    mock_etl_pipeline_factory: MockETLPipelineFactory, count: int
+) -> None:
+    """Test that ThreadPoolExecutor max_workers matches process_workers config when using sync_process."""
+    # Test with different process_workers values
+    pipeline = mock_etl_pipeline_factory.create_sync(process_workers=count)
+
+    # Verify that _process_executor is created and has correct max_workers
+    assert pipeline._process_executor is not None
+    assert pipeline._process_executor._max_workers == count
+
+
+def test_no_thread_pool_executor_when_async_process(mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
+    """Test that ThreadPoolExecutor is not created when using async process."""
+    pipeline = mock_etl_pipeline_factory.create(process_workers=10)
+
+    # Verify that _process_executor is None
+    assert pipeline._process_executor is None
