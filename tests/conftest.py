@@ -211,9 +211,9 @@ class PerfTestETLPipelineConfig:
     enable_tracking: bool = True
     # Test specific parameters
     items_to_process: list[WorkItem] | None = None
-    fetch_delay = 0.00  # 1ms simulated fetch
-    process_delay = 0.00  # 2ms simulated processing
-    store_delay = 0.00  # 1ms simulated store
+    fetch_delay = 0.001  # 1ms simulated fetch
+    process_delay = 0.002  # 2ms simulated processing
+    store_delay = 0.001  # 1ms simulated store
 
 
 class PerfTestETLPipeline(ETLPipeline):

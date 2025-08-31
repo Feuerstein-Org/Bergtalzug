@@ -38,7 +38,7 @@ jobs:
         run: mise run test-ci
 
   benchmark:
-    runs-on: codspeed-macro
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: jdx/mise-action@v2
