@@ -200,12 +200,12 @@ class PerfTestETLPipelineConfig:
     """
 
     pipeline_name: str = "perf_test_etl_pipeline"
-    fetch_workers: int = 5
-    process_workers: int = 3
-    store_workers: int = 5
-    fetch_queue_size: int = 100
-    process_queue_size: int = 50
-    store_queue_size: int = 100
+    fetch_workers: int = 50
+    process_workers: int = 30
+    store_workers: int = 50
+    fetch_queue_size: int = 50
+    process_queue_size: int = 25
+    store_queue_size: int = 50
     queue_refresh_rate: float = 0.01  # seconds
     stats_interval_seconds: float = 1.0
     enable_tracking: bool = True
@@ -257,7 +257,6 @@ class PerfTestETLPipeline(ETLPipeline):
     async def store(self, item: WorkItem) -> None:
         """Simulate store operation with configured delay"""
         await asyncio.sleep(self.config.store_delay)
-        # Simulate storage operation
         pass
 
 

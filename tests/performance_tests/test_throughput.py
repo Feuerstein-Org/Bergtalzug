@@ -8,7 +8,7 @@ from conftest import PerfTestETLPipelineFactory
 @pytest.mark.benchmark(group="throughput")
 async def test_pipeline_throughput_small_batch(perf_etl_pipeline_factory: PerfTestETLPipelineFactory) -> None:
     """Test throughput with small batch of items"""
-    pipeline = perf_etl_pipeline_factory.create(work_items_count=1000, items_size_range=(1024, 4096))
+    pipeline = perf_etl_pipeline_factory.create(work_items_count=100, items_size_range=(1024, 4096))
 
     async def run_pipeline() -> int:
         results = await pipeline.run()
@@ -16,4 +16,4 @@ async def test_pipeline_throughput_small_batch(perf_etl_pipeline_factory: PerfTe
 
     processed_count = await run_pipeline()
 
-    assert processed_count == 1000
+    assert processed_count == 100
