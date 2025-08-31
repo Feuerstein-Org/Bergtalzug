@@ -36,6 +36,16 @@ jobs:
         run: mise run install-uv-ci
       - name: Run tests
         run: mise run test-ci
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - name: Install dependencies
+        run: mise run install-uv-ci
       - name: Run performance benchmarks
         uses: CodSpeedHQ/action@v3
         with:
