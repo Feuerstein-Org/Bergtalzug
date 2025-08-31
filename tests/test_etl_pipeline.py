@@ -53,6 +53,21 @@ class TestPipelineIntegration:
         assert pipeline.mock_store.call_count == 5
 
     @pytest.mark.asyncio
+    async def test_simple_pipeline_with_tracking_disabled(
+        self, mock_etl_pipeline_factory: MockETLPipelineFactory
+    ) -> None:
+        """Test basic end-to-end flow"""
+        pipeline = mock_etl_pipeline_factory.create(work_items_count=5, enable_tracking=False)
+
+        # Without item tracking no pipeline results
+        await pipeline.run()
+
+        # Verify all stages were called
+        assert pipeline.mock_fetch.call_count == 5
+        assert pipeline.mock_process.call_count == 5
+        assert pipeline.mock_store.call_count == 5
+
+    @pytest.mark.asyncio
     async def test_pipeline_with_errors(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test pipeline handles errors gracefully"""
         items = work_item_factory(count=3)

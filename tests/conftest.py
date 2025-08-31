@@ -38,10 +38,7 @@ class MockETLPipelineConfig:
     enable_tracking: bool = True
     # Test specific parameters
     items_to_process: list[WorkItem] | None = None
-    refill_queue_sleep: float | None = None
-    fetch_sleep: float | None = None
     process_sleep: float | None = None
-    store_sleep: float | None = None
     process_is_sync: bool = False  # Whether to use sync_process or async process
 
 
@@ -55,11 +52,9 @@ class MockETLPipeline(ETLPipeline):
     Each worker pool can have the size set to 0 to disable it for testing.
     """
 
-    def __init__(self, mocker: MockerFixture, config: MockETLPipelineConfig | None = None) -> None:
+    def __init__(self, mocker: MockerFixture, config: MockETLPipelineConfig) -> None:
         """Initialize the mock ETL pipeline with configuration."""
         # Use default config if none provided
-        if config is None:
-            config = MockETLPipelineConfig()
 
         # Pass ETL pipeline parameters to parent constructor
         etl_config = ETLPipelineConfig(
@@ -104,9 +99,6 @@ class MockETLPipeline(ETLPipeline):
         return self.mock_process_is_sync
 
     async def _refill_queue_impl(self, count: int) -> list[WorkItem]:
-        if self.config.refill_queue_sleep is not None and self.config.refill_queue_sleep > 0:
-            await asyncio.sleep(self.config.refill_queue_sleep)
-
         if self.items_to_process:
             batch = self.items_to_process[:count]
             self.items_to_process = self.items_to_process[count:]
@@ -114,8 +106,6 @@ class MockETLPipeline(ETLPipeline):
         return []
 
     async def _fetch_impl(self, item: WorkItem) -> WorkItem:
-        if self.config.fetch_sleep is not None and self.config.fetch_sleep > 0:
-            await asyncio.sleep(self.config.fetch_sleep)
         return item
 
     async def _process_impl(self, item: WorkItem) -> WorkItem:
@@ -131,8 +121,7 @@ class MockETLPipeline(ETLPipeline):
         return item
 
     async def _store_impl(self, item: WorkItem) -> None:
-        if self.config.store_sleep is not None and self.config.store_sleep > 0:
-            await asyncio.sleep(self.config.store_sleep)
+        return
 
 
 class MockETLPipelineFactory:
@@ -149,12 +138,10 @@ class MockETLPipelineFactory:
         Create a MockETLPipeline with the given configuration.
 
         Will always overwrite items_to_process in config if work_items_count is passed.
+        Will ignore kwargs if config is passed.
         """
         if config is None:
             config = MockETLPipelineConfig(**kwargs)
-        elif kwargs:
-            # If both config and kwargs are provided, raise an error to avoid confusion
-            raise ValueError("Cannot provide both 'config' and individual parameters via kwargs")
         if work_items_count:
             work_items = work_item_factory(count=work_items_count)
             config.items_to_process = work_items
@@ -167,12 +154,10 @@ class MockETLPipelineFactory:
         Create a MockETLPipeline with the given configuration and use threads for processing.
 
         Will always overwrite items_to_process in config if work_items_count is passed.
+        Will ignore kwargs if config is passed.
         """
         if config is None:
             config = MockETLPipelineConfig(**kwargs)
-        elif kwargs:
-            # If both config and kwargs are provided, raise an error to avoid confusion
-            raise ValueError("Cannot provide both 'config' and individual parameters via kwargs")
         config.process_is_sync = True
         if work_items_count:
             work_items = work_item_factory(count=work_items_count)

@@ -251,7 +251,7 @@ class ETLPipelineConfig(BaseModel):
         process_queue_size (PositiveInt): Size of the process queue.
         store_queue_size (PositiveInt): Size of the store queue.
         queue_refresh_rate (NonNegativeFloat): Interval in seconds to check and refill the fetch queue.
-        enable_tracking (bool): Whether to enable item tracking.
+        enable_tracking (bool): Whether to enable item tracking, will return PipelineResult on completion.
         stats_interval_seconds (NonNegativeFloat): Interval in seconds to report pipeline statistics.
 
     Raises:
@@ -273,6 +273,8 @@ class ETLPipelineConfig(BaseModel):
     # TODO: Potentially add some validation functions, e.g. too big/small queue etc.
 
 
+# TODO: Make some properties public and modifiable, e.g. queue refresh rate or fetch workers
+# if dynamic worker size is available
 class ETLPipeline(ABC):
     """
     Abstract base class for an ETL pipeline.
@@ -289,6 +291,9 @@ class ETLPipeline(ABC):
 
     Note: only process or sync_process can be defined, not both.
     Only use sync_process if you have non-async compatible code.
+
+    Setting enable_tracking in the ETLPipelineConfig is required to track items as well as
+    get PipelineResult on completion of processing.
     """
 
     def __init__(self, config: ETLPipelineConfig | None = None, **kwargs: Any) -> None:
@@ -415,6 +420,46 @@ class ETLPipeline(ABC):
         It is expected to be asynchronous, e.g., storeing to S3.
         """
         pass
+
+    @property
+    def fetch_workers(self) -> int:
+        """Number of fetch workers"""
+        return self._fetch_workers
+
+    @property
+    def process_workers(self) -> int:
+        """Number of process workers (async or sync)"""
+        return self._process_workers
+
+    @property
+    def store_workers(self) -> int:
+        """Number of store workers"""
+        return self._store_workers
+
+    @property
+    def fetch_queue_size(self) -> int:
+        """Size of the fetch queue"""
+        return self._fetch_queue_size
+
+    @property
+    def process_queue_size(self) -> int:
+        """Size of the process queue"""
+        return self._process_queue_size
+
+    @property
+    def store_queue_size(self) -> int:
+        """Size of the store queue"""
+        return self._store_queue_size
+
+    @property
+    def process_is_sync(self) -> bool:
+        """Whether the process stage is synchronous."""
+        return self._process_is_sync
+
+    @property
+    def queue_refresh_rate(self) -> float:
+        """Rate at which the queue is refreshed."""
+        return self._queue_refresh_rate
 
     async def _setup_queues(self) -> None:
         """
