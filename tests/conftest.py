@@ -7,13 +7,23 @@ from bergtalzug import ETLPipeline, ETLPipelineConfig, WorkItem
 from pytest_mock import MockerFixture
 import asyncio
 import time
+import random
 
 
-def work_item_factory(count: int = 1, data: bytes = b"test_data") -> list[WorkItem]:
+def work_item_factory(
+    count: int = 1, data: bytes = b"test_data", size_range: tuple[int, int] | None = None
+) -> list[WorkItem]:
     """Create a list of WorkItem instances with custom data."""
     work_items: list[WorkItem] = []
     for _ in range(count):
-        work_items.append(WorkItem(data=data))
+        if size_range:
+            # Generate random size within the specified range
+            size = random.randint(size_range[0], size_range[1])
+            # Generate random data for the item
+            item_data = random.randbytes(size)
+        else:
+            item_data = data
+        work_items.append(WorkItem(data=item_data))
     return work_items
 
 
@@ -38,7 +48,7 @@ class MockETLPipelineConfig:
     enable_tracking: bool = True
     # Test specific parameters
     items_to_process: list[WorkItem] | None = None
-    process_sleep: float | None = None
+    process_delay: float | None = None
     process_is_sync: bool = False  # Whether to use sync_process or async process
 
 
@@ -109,14 +119,14 @@ class MockETLPipeline(ETLPipeline):
         return item
 
     async def _process_impl(self, item: WorkItem) -> WorkItem:
-        if self.config.process_sleep is not None and self.config.process_sleep > 0:
-            await asyncio.sleep(self.config.process_sleep)
+        if self.config.process_delay is not None and self.config.process_delay > 0:
+            await asyncio.sleep(self.config.process_delay)
         item.data = b"processed_" + item.data
         return item
 
     def _sync_process_impl(self, item: WorkItem) -> WorkItem:
-        if self.config.process_sleep is not None and self.config.process_sleep > 0:
-            time.sleep(self.config.process_sleep)
+        if self.config.process_delay is not None and self.config.process_delay > 0:
+            time.sleep(self.config.process_delay)
         item.data = b"processed_" + item.data
         return item
 
@@ -173,3 +183,159 @@ def mock_etl_pipeline_factory(mocker: MockerFixture) -> MockETLPipelineFactory:
     MockETLPipeline.__abstractmethods__ = frozenset()
 
     return MockETLPipelineFactory(mocker)
+
+
+##############################
+# Performance Test Pipeline  #
+##############################
+
+
+@dataclass
+class PerfTestETLPipelineConfig:
+    """
+    Configuration for the PerfTestETLPipeline class.
+
+    No validation is performed here. This class is used to have lower testing defaults
+    for performance tests and is passed to the ETLPipelineConfig class which performs validation.
+    """
+
+    pipeline_name: str = "perf_test_etl_pipeline"
+    fetch_workers: int = 5
+    process_workers: int = 3
+    store_workers: int = 5
+    fetch_queue_size: int = 100
+    process_queue_size: int = 50
+    store_queue_size: int = 100
+    queue_refresh_rate: float = 0.01  # seconds
+    stats_interval_seconds: float = 1.0
+    enable_tracking: bool = True
+    # Test specific parameters
+    items_to_process: list[WorkItem] | None = None
+    fetch_delay = 0.00  # 1ms simulated fetch
+    process_delay = 0.00  # 2ms simulated processing
+    store_delay = 0.00  # 1ms simulated store
+
+
+class PerfTestETLPipeline(ETLPipeline):
+    """Simple tests pipeline for performance tests"""
+
+    def __init__(self, config: PerfTestETLPipelineConfig) -> None:
+        """Initialize the test ETL pipeline with configuration."""
+        etl_config = ETLPipelineConfig(
+            pipeline_name=config.pipeline_name,
+            fetch_workers=config.fetch_workers,
+            process_workers=config.process_workers,
+            store_workers=config.store_workers,
+            fetch_queue_size=config.fetch_queue_size,
+            process_queue_size=config.process_queue_size,
+            store_queue_size=config.store_queue_size,
+            queue_refresh_rate=config.queue_refresh_rate,
+            stats_interval_seconds=config.stats_interval_seconds,
+            enable_tracking=config.enable_tracking,
+        )
+        super().__init__(etl_config)
+        self.config = config
+        self.items_iterator = iter(config.items_to_process or [])
+
+    async def refill_queue(self, count: int) -> list[WorkItem]:
+        """Get work items from the pre-generated list"""
+        items: list[WorkItem] = []
+        try:
+            for _ in range(count):
+                item = next(self.items_iterator)
+                items.append(item)
+        except StopIteration:
+            # No more items to process
+            pass
+        return items
+
+    async def fetch(self, item: WorkItem) -> WorkItem:
+        """Simulate fetch operation with configured delay"""
+        await asyncio.sleep(self.config.fetch_delay)
+        return item
+
+    async def store(self, item: WorkItem) -> None:
+        """Simulate store operation with configured delay"""
+        await asyncio.sleep(self.config.store_delay)
+        # Simulate storage operation
+        pass
+
+
+class AsyncPerfTestETLPipeline(PerfTestETLPipeline):
+    """Async process version of PerfTestETLPipeline"""
+
+    async def process(self, item: WorkItem) -> WorkItem:
+        """Simulate processing operation with configured delay"""
+        await asyncio.sleep(self.config.process_delay)
+        item.data = b"processed_" + item.data
+        return item
+
+
+class SyncPerfTestETLPipeline(PerfTestETLPipeline):
+    """Sync process version of PerfTestETLPipeline"""
+
+    def sync_process(self, item: WorkItem) -> WorkItem:
+        """Simulate synchronous processing operation with configured delay"""
+        time.sleep(self.config.process_delay)
+        item.data = b"processed_" + item.data
+        return item
+
+
+class PerfTestETLPipelineFactory:
+    """Collection of factory methods to create PerfTestETLPipeline instances."""
+
+    def create(
+        self,
+        config: PerfTestETLPipelineConfig | None = None,
+        work_items_count: int | None = None,
+        items_size_range: tuple[int, int] | None = None,
+        **kwargs: Any,
+    ) -> AsyncPerfTestETLPipeline:
+        """
+        Create a AsyncPerfTestETLPipeline with the given configuration.
+
+        Will always overwrite items_to_process in config if work_items_count is passed.
+        Will ignore kwargs if config is passed.
+        """
+        if config is None:
+            config = PerfTestETLPipelineConfig(**kwargs)
+
+        # Generate items using work_item_factory if count is provided
+        if work_items_count is not None:
+            if items_size_range:
+                work_items = work_item_factory(count=work_items_count, size_range=items_size_range)
+            else:
+                work_items = work_item_factory(count=work_items_count)
+            config.items_to_process = work_items
+        return AsyncPerfTestETLPipeline(config)
+
+    def create_sync(
+        self,
+        config: PerfTestETLPipelineConfig | None = None,
+        work_items_count: int | None = None,
+        items_size_range: tuple[int, int] | None = None,
+        **kwargs: Any,
+    ) -> SyncPerfTestETLPipeline:
+        """
+        Create a SyncPerfTestETLPipeline with the given configuration.
+
+        Will always overwrite items_to_process in config if work_items_count is passed.
+        Will ignore kwargs if config is passed.
+        """
+        if config is None:
+            config = PerfTestETLPipelineConfig(**kwargs)
+
+        # Generate items using work_item_factory if count is provided
+        if work_items_count is not None:
+            if items_size_range:
+                work_items = work_item_factory(count=work_items_count, size_range=items_size_range)
+            else:
+                work_items = work_item_factory(count=work_items_count)
+            config.items_to_process = work_items
+        return SyncPerfTestETLPipeline(config)
+
+
+@pytest.fixture
+def perf_etl_pipeline_factory() -> PerfTestETLPipelineFactory:
+    """Fixture providing a PerfTestETLPipelineFactory for creating test pipelines"""
+    return PerfTestETLPipelineFactory()

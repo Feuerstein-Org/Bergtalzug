@@ -1,19 +1,13 @@
 [tools]
 python = "3.13"
 uv = "latest"
+act = "latest"
 
 [tasks.install]
 description = "Install all dependencies including dev dependencies"
 run = [
     "uv sync --all-extras --dev",
     "uv run pre-commit install"
-]
-
-[tasks.bergtalzug]
-description = "Simple script to run main function"
-run = [
-    "uv run python -m bergtalzug.main"
-    # "uv run pre-commit install"
 ]
 
 [tasks.pre-commit]
@@ -36,9 +30,33 @@ run = [
 ]
 
 [tasks.test]
-description = "Run tests with coverage & pre-commit"
-depends = ["pre-commit"]
+description = "Run pytest"
+run = [
+    "uv run pytest --ignore=tests/performance_tests"
+]
+
+[tasks.test-performance]
+description = "Run codspeed benchmarks"
+run = [
+    "uv run pytest tests/performance_tests --codspeed"
+]
+
+[tasks.test-coverage]
+description = "Run tests with coverage"
 run = [
     "uv run coverage run -m pytest",
     "uv run coverage report --fail-under=80"
+]
+
+[tasks.test-full]
+depends = ["pre-commit"]
+run = [
+    "mise run test-coverage",
+    "mise run test-performance"
+]
+
+[tasks.act]
+description = "Test github actions workflow"
+run = [
+    "act"
 ]

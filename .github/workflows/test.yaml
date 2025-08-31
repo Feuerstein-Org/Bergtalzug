@@ -1,0 +1,43 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - dev
+
+env:
+  MISE_OVERRIDE_CONFIG_FILENAMES: "mise.ci.toml"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - name: Install dependencies
+        run: mise run install-uv-ci
+      - name: Lint
+        run: mise run lint-ci
+      - name: Pre-commit
+        run: mise run pre-commit-ci
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - name: Install dependencies
+        run: mise run install-uv-ci
+      - name: Run tests
+        run: mise run test-ci
+      - name: Run performance benchmarks
+        uses: CodSpeedHQ/action@v3
+        with:
+          run: uv run pytest tests/performance_tests --codspeed
+          token: ${{ secrets.CODSPEED_TOKEN }}

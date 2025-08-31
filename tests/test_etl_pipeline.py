@@ -107,7 +107,7 @@ class TestPipelineIntegration:
     async def test_pipeline_concurrent_processing(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test concurrent processing maintains data integrity"""
         pipeline = mock_etl_pipeline_factory.create(
-            work_items_count=50, fetch_workers=5, process_workers=5, store_workers=5, process_sleep=0.01
+            work_items_count=50, fetch_workers=5, process_workers=5, store_workers=5, process_delay=0.01
         )
         results = await pipeline.run()
 
@@ -121,7 +121,7 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_updates_tracker_stages(self, mock_etl_pipeline_factory: MockETLPipelineFactory) -> None:
         """Test that pipeline correctly updates tracker stages"""
-        pipeline = mock_etl_pipeline_factory.create(work_items_count=2, process_sleep=0.01)
+        pipeline = mock_etl_pipeline_factory.create(work_items_count=2, process_delay=0.01)
         assert pipeline.tracker is not None
         tracker = pipeline.tracker
 

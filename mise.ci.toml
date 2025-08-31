@@ -1,0 +1,31 @@
+[tools]
+python = "3.13"
+uv = "latest"
+
+[tasks.install-uv-ci]
+description = "Install dependencies for CI"
+run = "uv sync --all-extras --dev"
+
+[tasks.lint-ci]
+description = "Show all issues detected by linter"
+run = [
+    "uv run ruff check . --output-format=github",
+    "uv run ruff format . --check --diff",
+]
+
+[tasks.pre-commit-ci]
+description = "Run pre-commit hooks"
+run = "uv run pre-commit run --all-files"
+
+[tasks.test-ci]
+description = "Run tests"
+run = [
+    "uv run coverage run -m pytest",
+    "uv run coverage report --fail-under=80"
+]
+
+[tasks.test-performance-ci]
+description = "Run codspeed benchmarks"
+run = [
+    "uv run pytest tests/performance_tests --codspeed"
+]
