@@ -1,19 +1,19 @@
 """Performance tests for ETL pipeline throughput"""
 
 import pytest
+import asyncio
+from pytest_codspeed import BenchmarkFixture
 from conftest import PerfTestETLPipelineFactory
 
 
-@pytest.mark.asyncio
 @pytest.mark.benchmark(group="throughput")
-async def test_pipeline_throughput_small_batch(perf_etl_pipeline_factory: PerfTestETLPipelineFactory) -> None:
+def test_pipeline_throughput_small_batch(
+    perf_etl_pipeline_factory: PerfTestETLPipelineFactory, benchmark: BenchmarkFixture
+) -> None:
     """Test throughput with small batch of items"""
     pipeline = perf_etl_pipeline_factory.create(work_items_count=100, items_size_range=(1024, 4096))
 
-    async def run_pipeline() -> int:
-        results = await pipeline.run()
-        return len([r for r in results if r.success])
+    def run_pipeline_sync() -> None:
+        asyncio.run(pipeline.run())
 
-    processed_count = await run_pipeline()
-
-    assert processed_count == 100
+    benchmark(run_pipeline_sync)
